@@ -44,14 +44,16 @@ jobs:
               ]
             }')
 
-          # 4. Отправляем запрос к GitHub Models
           RESPONSE=$(curl -s -X POST "https://models.github.ai/inference/chat/completions" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -d "$JSON_PAYLOAD")
 
-          # 5. Извлекаем результат
+          # Выводим полный ответ API в лог (для диагностики)
+          echo "=== API RESPONSE ==="
+          echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+          echo "===================="
+
           SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Не удалось получить описание"')
 
-          # 6. Публикуем комментарий в PR
           gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary (via GitHub Models)\n\n$SUMMARY"
