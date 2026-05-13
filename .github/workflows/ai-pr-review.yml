@@ -1,0 +1,45 @@
+name: AI Pull Request Review & Summary
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate AI Summary with llm7.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          DIFF=$(gh pr diff "$PR_NUMBER")
+          if [ -z "$DIFF" ]; then
+            DIFF="Нет изменений для описания."
+          fi
+
+          PROMPT="Ты — полезный ассистент. Опиши кратко и структурированно изменения в этом Pull Request на русском языке. Вот diff:\n\n$DIFF"
+
+          RESPONSE=$(curl -s -X POST https://api.llm7.io/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"model\": \"gpt-3.5-turbo\",
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"Ты — полезный ассистент.\"},
+                {\"role\": \"user\", \"content\": $(echo "$PROMPT" | jq -Rs .)}
+              ]
+            }")
+
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Не удалось получить описание"')
+
+          # Исправлено: корректная передача переносов строк
+          printf "## 🤖 AI Summary\n\n%s" "$SUMMARY" | gh pr comment "$PR_NUMBER" --body-file -
