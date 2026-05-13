@@ -62,7 +62,23 @@ def get_orders():
     elif role == 'customer':
         orders = Order.query.filter_by(customer_id=user_id).order_by(Order.created_at.desc()).all()
     elif role == 'driver':
-        orders = Order.query.filter_by(driver_id=user_id).order_by(Order.created_at.desc()).all()
+        # Водитель видит все свободные заказы (pending без водителя) + свой активный заказ (если есть)
+        pending_orders = Order.query.filter(
+            Order.status == 'pending',
+            Order.driver_id.is_(None)
+        ).order_by(Order.created_at.desc()).all()
+
+        active_order = Order.query.filter(
+            Order.driver_id == user_id,
+            Order.status.in_(['assigned', 'accepted', 'in_progress'])
+        ).first()
+
+        # Объединяем: сначала активный (если есть), потом свободные
+        result = []
+        if active_order:
+            result.append(active_order)
+        result.extend(pending_orders)
+        return jsonify([o.to_dict() for o in result]), 200
     else:
         return jsonify({'msg': 'Invalid role'}), 403
 
@@ -94,6 +110,43 @@ def assign_driver(order_id):
     db.session.commit()
     return jsonify(order.to_dict()), 200
 
+# --- Новый эндпоинт: водитель берёт заказ сам ---
+@orders_bp.route('/<int:order_id>/take', methods=['PATCH'])
+@jwt_required()
+def take_order(order_id):
+    """Водитель назначает себя на свободный заказ"""
+    claims = get_jwt()
+    if claims.get('role') != 'driver':
+        return jsonify({'msg': 'Only drivers can take orders'}), 403
+
+    driver_id = int(get_jwt_identity())
+    driver = db.session.get(User, driver_id)
+    if not driver or driver.role != 'driver':
+        return jsonify({'msg': 'Invalid driver'}), 400
+
+    # Проверяем, нет ли уже активного заказа
+    active_order = Order.query.filter(
+        Order.driver_id == driver_id,
+        Order.status.in_(['assigned', 'accepted', 'in_progress'])
+    ).first()
+    if active_order:
+        return jsonify({'msg': 'You already have an active order. Complete it before taking a new one.'}), 400
+
+    order = db.session.get(Order, order_id)
+    if order is None:
+        return jsonify({'msg': 'Order not found'}), 404
+    if order.status != 'pending' or order.driver_id is not None:
+        return jsonify({'msg': 'Order is already taken or not pending'}), 400
+
+    if not driver.is_available:
+        return jsonify({'msg': 'You are not available'}), 400
+
+    order.driver_id = driver_id
+    order.status = 'assigned'
+    driver.is_available = False
+    db.session.commit()
+    return jsonify(order.to_dict()), 200
+
 @orders_bp.route('/<int:order_id>/accept', methods=['PATCH'])
 @jwt_required()
 def accept_order(order_id):
@@ -112,7 +165,6 @@ def accept_order(order_id):
         return jsonify({'msg': f'Cannot accept order in status {order.status}'}), 400
 
     order.status = 'accepted'
-    # Водитель уже помечен как unavailable при назначении, ничего не меняем
     db.session.commit()
     return jsonify(order.to_dict()), 200
 
@@ -179,10 +231,8 @@ def cancel_order(order_id):
     claims = get_jwt()
     user_id = int(get_jwt_identity())
     if claims.get('role') == 'admin' or order.customer_id == user_id:
-        # Если был назначен водитель, проверяем, не нужно ли его освободить
-        driver = order.driver  # благодаря relationship
+        driver = order.driver
         if driver and order.status in ['assigned', 'accepted', 'in_progress']:
-            # Возвращаем доступность, если других активных заказов нет
             active_orders = Order.query.filter(
                 Order.driver_id == driver.id,
                 Order.id != order.id,

@@ -8,67 +8,130 @@
 <body>
     <div class="container mt-4">
         <div class="d-flex justify-content-between">
-            <h3>Мои заказы</h3>
+            <h3>Панель водителя</h3>
             <button class="btn btn-danger" onclick="logout()">Выйти</button>
         </div>
         <hr>
+
+        <!-- Блок активного заказа (если есть) -->
+        <div id="activeOrderBlock" class="card mb-4 border-success">
+            <div class="card-header bg-success text-white">Ваш активный заказ</div>
+            <div class="card-body" id="activeOrderInfo">
+                <p>Нет активного заказа.</p>
+            </div>
+        </div>
+
+        <!-- Список доступных заказов -->
+        <h5>Доступные заказы</h5>
         <table class="table table-bordered">
             <thead>
                 <tr>
                     <th>ID</th>
                     <th>Откуда → Куда</th>
-                    <th>Статус</th>
                     <th>Клиент</th>
                     <th>Стоимость</th>
-                    <th>Действия</th>
+                    <th>Действие</th>
                 </tr>
             </thead>
-            <tbody id="ordersTable"></tbody>
+            <tbody id="availableOrdersTable"></tbody>
         </table>
     </div>
+
     <script src="/static/main.js"></script>
     <script>
+        let activeOrder = null;   // текущий активный заказ водителя
+        let availableOrders = []; // список pending заказов (без водителя)
+
         async function loadOrders() {
             const orders = await fetchWithAuth('/orders');
-            const tbody = document.getElementById('ordersTable');
-            tbody.innerHTML = orders.map(o => {
-                let actions = '';
-                if (o.status === 'assigned') {
-                    actions = `<button class="btn btn-sm btn-success me-1" onclick="updateOrder(${o.id}, 'accept')">Принять</button>
-                               <button class="btn btn-sm btn-warning" onclick="updateOrder(${o.id}, 'cancel')">Отклонить</button>`;
-                } else if (o.status === 'accepted') {
-                    actions = `<button class="btn btn-sm btn-primary" onclick="updateOrder(${o.id}, 'start')">Начать поездку</button>`;
-                } else if (o.status === 'in_progress') {
-                    actions = `<button class="btn btn-sm btn-success" onclick="updateOrder(${o.id}, 'complete')">Завершить</button>`;
-                }
-                return `
-                    <tr>
-                        <td>${o.id}</td>
-                        <td>${o.pickup_address} → ${o.destination_address}</td>
-                        <td>${o.status}</td>
-                        <td>${o.customer_name || '-'}</td>
-                        <td>${o.cost}</td>
-                        <td>${actions}</td>
-                    </tr>
-                `;
-            }).join('');
+            // Разделяем: первый элемент может быть активным заказом, остальные — pending
+            if (orders.length > 0 && ['assigned', 'accepted', 'in_progress'].includes(orders[0].status)) {
+                activeOrder = orders[0];
+                availableOrders = orders.slice(1);
+            } else {
+                activeOrder = null;
+                availableOrders = orders;
+            }
+            renderActiveOrder();
+            renderAvailableOrders();
         }
 
-        async function updateOrder(id, action) {
-            const endpoints = {
-                accept: `/orders/${id}/accept`,
-                start: `/orders/${id}/start`,
-                complete: `/orders/${id}/complete`
-            };
-            if (action === 'cancel') {
-                // Водитель не отменяет заказ, но можно добавить, если потребуется
-                alert('Отмена не реализована для водителя');
+        function renderActiveOrder() {
+            const block = document.getElementById('activeOrderInfo');
+            if (!activeOrder) {
+                block.innerHTML = '<p>Нет активного заказа.</p>';
                 return;
             }
-            await fetchWithAuth(endpoints[action], 'PATCH');
-            loadOrders();
+            let actionsHtml = '';
+            if (activeOrder.status === 'assigned') {
+                actionsHtml = `
+                    <button class="btn btn-sm btn-success me-2" onclick="updateActiveOrder('accept')">Принять</button>
+                `;
+            } else if (activeOrder.status === 'accepted') {
+                actionsHtml = `
+                    <button class="btn btn-sm btn-primary me-2" onclick="updateActiveOrder('start')">Начать поездку</button>
+                `;
+            } else if (activeOrder.status === 'in_progress') {
+                actionsHtml = `
+                    <button class="btn btn-sm btn-success me-2" onclick="updateActiveOrder('complete')">Завершить</button>
+                `;
+            }
+            block.innerHTML = `
+                <p><strong>Заказ #${activeOrder.id}</strong></p>
+                <p>Откуда: ${activeOrder.pickup_address}<br>Куда: ${activeOrder.destination_address}<br>
+                Клиент: ${activeOrder.customer_name || '-'}<br>Стоимость: ${activeOrder.cost} ${activeOrder.tariff_name || ''}</p>
+                <p>Статус: <span class="badge bg-info">${activeOrder.status}</span></p>
+                ${actionsHtml}
+            `;
         }
 
+        function renderAvailableOrders() {
+            const tbody = document.getElementById('availableOrdersTable');
+            tbody.innerHTML = availableOrders.map(o => `
+                <tr>
+                    <td>${o.id}</td>
+                    <td>${o.pickup_address} → ${o.destination_address}</td>
+                    <td>${o.customer_name || '-'}</td>
+                    <td>${o.cost}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" 
+                                onclick="takeOrder(${o.id})"
+                                ${activeOrder ? 'disabled' : ''}>
+                            Взять заказ
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function takeOrder(orderId) {
+            if (activeOrder) {
+                alert('У вас уже есть активный заказ. Завершите его, прежде чем брать новый.');
+                return;
+            }
+            try {
+                await fetchWithAuth(`/orders/${orderId}/take`, 'PATCH');
+                loadOrders();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        }
+
+        async function updateActiveOrder(action) {
+            const endpoints = {
+                accept: `/orders/${activeOrder.id}/accept`,
+                start: `/orders/${activeOrder.id}/start`,
+                complete: `/orders/${activeOrder.id}/complete`
+            };
+            try {
+                await fetchWithAuth(endpoints[action], 'PATCH');
+                loadOrders();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        }
+
+        // Первоначальная загрузка
         loadOrders();
     </script>
 </body>
