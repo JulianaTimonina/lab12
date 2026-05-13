@@ -25,7 +25,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # получить всю историю, чтобы gh pr diff работал надёжно
+          fetch-depth: 0
 
       - name: Generate AI Summary with Gemini
         env:
@@ -33,21 +33,52 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Получаем diff через GitHub CLI (всегда работает)
-          DIFF=$(gh pr diff $PR_NUMBER)
+          # Проверяем, что ключ API задан
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "Ошибка: GEMINI_API_KEY не задан в secrets"
+            exit 1
+          fi
 
-          # Формируем запрос к Gemini
+          # Получаем diff через GitHub CLI (авторизация по GITHUB_TOKEN)
+          DIFF=$(gh pr diff "$PR_NUMBER")
+
+          if [ -z "$DIFF" ]; then
+            echo "Предупреждение: пустой diff"
+            DIFF="Нет изменений для описания."
+          fi
+
+          # Экранируем diff для передачи в JSON (заменяем \, ", и управляющие символы)
+          ESCAPED_DIFF=$(echo "$DIFF" | jq -Rs .)
+
+          # Формируем JSON-запрос с помощью jq
           PROMPT="Ты — полезный ассистент. Опиши кратко и структурированно изменения в этом Pull Request на русском языке. Вот diff:\n\n$DIFF"
+          ESCAPED_PROMPT=$(echo "$PROMPT" | jq -Rs .)
 
-          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$GEMINI_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "contents": [{
-                "parts": [{"text": "'"${PROMPT//$'\n'/\\n}"'"}]
-              }]
+          JSON_PAYLOAD=$(jq -n \
+            --arg prompt "$ESCAPED_PROMPT" \
+            '{
+              contents: [
+                {
+                  parts: [
+                    { text: ($prompt | fromjson) }
+                  ]
+                }
+              ]
             }')
 
+          # Отправляем запрос к Gemini API
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$GEMINI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD")
+
+          # Извлекаем текст ответа
           SUMMARY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Не удалось получить описание"')
+
+          # Если ответ пустой или ошибка — показываем отладку (можно закомментировать)
+          if [ "$SUMMARY" = "Не удалось получить описание" ]; then
+            echo "Ошибка API. Ответ:"
+            echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+          fi
 
           # Публикуем комментарий в PR
           gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary\n\n$SUMMARY"
