@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Отчёты</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <h3>Отчёты</h3>
+        <div class="row">
+            <div class="col-md-6">
+                <h5>Дневная выручка</h5>
+                <div class="mb-3">
+                    <label>Начало</label><input type="date" id="startDate" class="form-control">
+                    <label>Конец</label><input type="date" id="endDate" class="form-control">
+                    <button class="btn btn-primary mt-2" onclick="loadDaily()">Загрузить</button>
+                </div>
+                <table class="table table-bordered">
+                    <thead><tr><th>Дата</th><th>Заказов</th><th>Выручка</th></tr></thead>
+                    <tbody id="dailyBody"></tbody>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h5>Эффективность водителей</h5>
+                <table class="table table-bordered">
+                    <thead><tr><th>ID</th><th>Водитель</th><th>Заказов</th><th>Выручка</th></tr></thead>
+                    <tbody id="driverPerfBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/main.js"></script>
+    <script>
+        async function loadDaily() {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const params = new URLSearchParams();
+            if (start) params.set('start_date', start);
+            if (end) params.set('end_date', end);
+            const data = await fetchWithAuth(`/reports/daily-summary?${params}`);
+            const tbody = document.getElementById('dailyBody');
+            tbody.innerHTML = data.map(d => `<tr><td>${d.date}</td><td>${d.orders}</td><td>${d.revenue.toFixed(2)}</td></tr>`).join('');
+        }
+
+        async function loadDriverPerf() {
+            const data = await fetchWithAuth('/reports/driver-performance');
+            const tbody = document.getElementById('driverPerfBody');
+            tbody.innerHTML = data.map(d => `<tr><td>${d.driver_id}</td><td>${d.driver_name}</td><td>${d.completed_orders}</td><td>${d.total_revenue.toFixed(2)}</td></tr>`).join('');
+        }
+
+        loadDaily();
+        loadDriverPerf();
+    </script>
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Панель заказчика</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center">
+            <h3>Мои заказы</h3>
+            <button class="btn btn-danger" onclick="logout()">Выйти</button>
+        </div>
+        <hr>
+        <!-- Форма создания заказа -->
+        <div class="card mb-4">
+            <div class="card-header">Новый заказ</div>
+            <div class="card-body">
+                <form id="newOrderForm">
+                    <div class="mb-3">
+                        <label>Откуда</label>
+                        <input type="text" id="pickup" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label>Куда</label>
+                        <input type="text" id="destination" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label>Тариф</label>
+                        <select id="tariff" class="form-select" required></select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Заказать такси</button>
+                </form>
+            </div>
+        </div>
+        <!-- Список заказов -->
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Откуда → Куда</th>
+                    <th>Статус</th>
+                    <th>Водитель</th>
+                    <th>Стоимость</th>
+                    <th>Дата</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="ordersTable"></tbody>
+        </table>
+    </div>
+    <script src="/static/main.js"></script>
+    <script>
+        // Загрузка тарифов
+        fetchWithAuth('/tariffs')
+            .then(tariffs => {
+                const select = document.getElementById('tariff');
+                tariffs.forEach(t => {
+                    select.innerHTML += `<option value="${t.id}">${t.name} (${t.base_fee}+${t.price_per_km}/км)</option>`;
+                });
+            });
+
+        // Создание заказа
+        document.getElementById('newOrderForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const body = {
+                pickup_address: document.getElementById('pickup').value,
+                destination_address: document.getElementById('destination').value,
+                tariff_id: parseInt(document.getElementById('tariff').value)
+            };
+            try {
+                await fetchWithAuth('/orders', 'POST', body);
+                alert('Заказ создан!');
+                loadOrders();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        });
+
+        async function loadOrders() {
+            const orders = await fetchWithAuth('/orders');
+            const tbody = document.getElementById('ordersTable');
+            tbody.innerHTML = orders.map(o => `
+                <tr>
+                    <td>${o.id}</td>
+                    <td>${o.pickup_address} → ${o.destination_address}</td>
+                    <td>${o.status}</td>
+                    <td>${o.driver_name || '-'}</td>
+                    <td>${o.cost} ${o.tariff_name ? '' : ''}</td>
+                    <td>${new Date(o.created_at).toLocaleString()}</td>
+                    <td>
+                        ${o.status !== 'completed' && o.status !== 'cancelled' ?
+                          `<button class="btn btn-sm btn-danger" onclick="cancelOrder(${o.id})">Отменить</button>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function cancelOrder(id) {
+            if (confirm('Отменить заказ?')) {
+                await fetchWithAuth(`/orders/${id}/cancel`, 'PATCH');
+                loadOrders();
+            }
+        }
+
+        // Первоначальная загрузка
+        loadOrders();
+    </script>
+</body>
+</html>

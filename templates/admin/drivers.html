@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Управление водителями</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <h3>Водители</h3>
+        <button class="btn btn-primary mb-3" data-bs-toggle="modal" data-bs-target="#driverModal" onclick="clearForm()">Добавить водителя</button>
+        <table class="table table-bordered">
+            <thead><tr><th>ID</th><th>Имя</th><th>Email</th><th>Телефон</th><th>Авто</th><th>Доступен</th><th>Действия</th></tr></thead>
+            <tbody id="driversTable"></tbody>
+        </table>
+        <!-- Модальное окно -->
+        <div class="modal fade" id="driverModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="driverModalLabel">Водитель</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form id="driverForm">
+                        <div class="modal-body">
+                            <input type="hidden" id="driverId">
+                            <div class="mb-3"><label>Имя</label><input type="text" id="name" class="form-control" required></div>
+                            <div class="mb-3"><label>Email</label><input type="email" id="email" class="form-control" required></div>
+                            <div class="mb-3"><label>Телефон</label><input type="text" id="phone" class="form-control"></div>
+                            <div class="mb-3"><label>Автомобиль</label><input type="text" id="vehicle" class="form-control"></div>
+                            <div class="mb-3"><label>Пароль</label><input type="password" id="password" class="form-control"></div>
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="is_available" checked><label class="form-check-label">Доступен</label></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="submit" class="btn btn-primary">Сохранить</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/main.js"></script>
+    <script>
+        let drivers = [];
+        async function loadDrivers() {
+            drivers = await fetchWithAuth('/drivers');
+            renderTable();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('driversTable');
+            tbody.innerHTML = drivers.map(d => `
+                <tr>
+                    <td>${d.id}</td>
+                    <td>${d.name}</td>
+                    <td>${d.email}</td>
+                    <td>${d.phone}</td>
+                    <td>${d.vehicle}</td>
+                    <td>${d.is_available ? '✅' : '❌'}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning me-1" onclick="editDriver(${d.id})">Изменить</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteDriver(${d.id})">Удалить</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function editDriver(id) {
+            const d = drivers.find(d => d.id === id);
+            document.getElementById('driverId').value = d.id;
+            document.getElementById('name').value = d.name;
+            document.getElementById('email').value = d.email;
+            document.getElementById('phone').value = d.phone || '';
+            document.getElementById('vehicle').value = d.vehicle || '';
+            document.getElementById('is_available').checked = d.is_available;
+            document.getElementById('password').value = '';
+            document.getElementById('driverModalLabel').textContent = 'Редактировать водителя';
+            new bootstrap.Modal(document.getElementById('driverModal')).show();
+        }
+
+        function clearForm() {
+            document.getElementById('driverForm').reset();
+            document.getElementById('driverId').value = '';
+            document.getElementById('driverModalLabel').textContent = 'Новый водитель';
+        }
+
+        document.getElementById('driverForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('driverId').value;
+            const payload = {
+                name: document.getElementById('name').value,
+                email: document.getElementById('email').value,
+                phone: document.getElementById('phone').value,
+                vehicle: document.getElementById('vehicle').value,
+                is_available: document.getElementById('is_available').checked,
+                password: document.getElementById('password').value || undefined
+            };
+            const method = id ? 'PUT' : 'POST';
+            const url = id ? `/drivers/${id}` : '/drivers';
+            await fetchWithAuth(url, method, payload);
+            bootstrap.Modal.getInstance(document.getElementById('driverModal')).hide();
+            loadDrivers();
+        });
+
+        async function deleteDriver(id) {
+            if (!confirm('Удалить водителя?')) return;
+            await fetchWithAuth(`/drivers/${id}`, 'DELETE');
+            loadDrivers();
+        }
+
+        loadDrivers();
+    </script>
+</body>
+</html>
