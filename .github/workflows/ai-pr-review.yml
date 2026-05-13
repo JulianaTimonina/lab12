@@ -24,17 +24,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # получить всю историю, чтобы gh pr diff работал надёжно
 
       - name: Generate AI Summary with Gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
         run: |
-          # Получаем diff между базовой веткой и PR
-          git fetch origin ${{ github.base_ref }}
-          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+          # Получаем diff через GitHub CLI (всегда работает)
+          DIFF=$(gh pr diff $PR_NUMBER)
 
           # Формируем запрос к Gemini
           PROMPT="Ты — полезный ассистент. Опиши кратко и структурированно изменения в этом Pull Request на русском языке. Вот diff:\n\n$DIFF"
@@ -47,7 +47,6 @@ jobs:
               }]
             }')
 
-          # Извлекаем текст ответа (упрощённо)
           SUMMARY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Не удалось получить описание"')
 
           # Публикуем комментарий в PR
