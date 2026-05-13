@@ -22,8 +22,33 @@ jobs:
     runs-on: ubuntu-latest
     needs: review
     steps:
-      - name: Generate AI Summary
-        uses: SUBHAZIT/PRGPT@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate AI Summary with Gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Получаем diff между базовой веткой и PR
+          git fetch origin ${{ github.base_ref }}
+          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+
+          # Формируем запрос к Gemini
+          PROMPT="Ты — полезный ассистент. Опиши кратко и структурированно изменения в этом Pull Request на русском языке. Вот diff:\n\n$DIFF"
+
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$GEMINI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "contents": [{
+                "parts": [{"text": "'"${PROMPT//$'\n'/\\n}"'"}]
+              }]
+            }')
+
+          # Извлекаем текст ответа (упрощённо)
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Не удалось получить описание"')
+
+          # Публикуем комментарий в PR
+          gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary\n\n$SUMMARY"
