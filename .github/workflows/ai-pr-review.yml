@@ -1,4 +1,4 @@
-name: AI Pull Request Review & Summary (GitHub Models)
+name: AI Pull Request Summary
 
 on:
   pull_request:
@@ -17,43 +17,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate AI Summary with GitHub Models
+      - name: Generate AI Summary with llm7.io
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # 1. Получаем diff через GitHub CLI
+          # Получаем diff
           DIFF=$(gh pr diff "$PR_NUMBER")
-
           if [ -z "$DIFF" ]; then
             DIFF="Нет изменений для описания."
           fi
 
-          # 2. Формируем промпт
+          # Формируем промпт
           PROMPT="Ты — полезный ассистент. Опиши кратко и структурированно изменения в этом Pull Request на русском языке. Вот diff:\n\n$DIFF"
-          ESCAPED_PROMPT=$(echo "$PROMPT" | jq -Rs .)
 
-          # 3. Собираем JSON-запрос для GitHub Models API
-          JSON_PAYLOAD=$(jq -n \
-            --arg prompt "$ESCAPED_PROMPT" \
-            '{
-              model: "openai/gpt-4o-mini",
-              messages: [
-                { role: "system", content: "Ты — полезный ассистент." },
-                { role: "user", content: ($prompt | fromjson) }
-              ]
-            }')
-
-          RESPONSE=$(curl -s -X POST "https://models.github.ai/inference/chat/completions" \
+          # Отправляем запрос к бесплатному API llm7.io
+          RESPONSE=$(curl -s -X POST https://api.llm7.io/v1/chat/completions \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -d "$JSON_PAYLOAD")
+            -d "{
+              \"model\": \"gpt-3.5-turbo\",
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"Ты — полезный ассистент.\"},
+                {\"role\": \"user\", \"content\": $(echo "$PROMPT" | jq -Rs .)}
+              ]
+            }")
 
-          # Выводим полный ответ API в лог (для диагностики)
-          echo "=== API RESPONSE ==="
-          echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
-          echo "===================="
-
+          # Извлекаем ответ
           SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Не удалось получить описание"')
 
-          gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary (via GitHub Models)\n\n$SUMMARY"
+          # Публикуем комментарий
+          gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary\n\n$SUMMARY"
