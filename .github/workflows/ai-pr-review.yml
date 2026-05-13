@@ -1,4 +1,4 @@
-name: AI Pull Request Review & Summary
+name: AI Pull Request Review & Summary (GitHub Models)
 
 on:
   pull_request:
@@ -9,76 +9,49 @@ permissions:
   pull-requests: write
 
 jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Run AI Code Review
-        uses: petarzarkov/gemini-code-review-action@v1.1.3
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   summarize:
     runs-on: ubuntu-latest
-    needs: review
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Generate AI Summary with Gemini
+      - name: Generate AI Summary with GitHub Models
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Проверяем, что ключ API задан
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "Ошибка: GEMINI_API_KEY не задан в secrets"
-            exit 1
-          fi
-
-          # Получаем diff через GitHub CLI (авторизация по GITHUB_TOKEN)
+          # 1. Получаем diff через GitHub CLI
           DIFF=$(gh pr diff "$PR_NUMBER")
 
           if [ -z "$DIFF" ]; then
-            echo "Предупреждение: пустой diff"
             DIFF="Нет изменений для описания."
           fi
 
-          # Экранируем diff для передачи в JSON (заменяем \, ", и управляющие символы)
-          ESCAPED_DIFF=$(echo "$DIFF" | jq -Rs .)
-
-          # Формируем JSON-запрос с помощью jq
+          # 2. Формируем промпт
           PROMPT="Ты — полезный ассистент. Опиши кратко и структурированно изменения в этом Pull Request на русском языке. Вот diff:\n\n$DIFF"
           ESCAPED_PROMPT=$(echo "$PROMPT" | jq -Rs .)
 
+          # 3. Собираем JSON-запрос для GitHub Models API
           JSON_PAYLOAD=$(jq -n \
             --arg prompt "$ESCAPED_PROMPT" \
             '{
-              contents: [
-                {
-                  parts: [
-                    { text: ($prompt | fromjson) }
-                  ]
-                }
+              model: "openai/gpt-4o-mini",
+              messages: [
+                { role: "system", content: "Ты — полезный ассистент." },
+                { role: "user", content: ($prompt | fromjson) }
               ]
             }')
 
-          # Отправляем запрос к Gemini API
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$GEMINI_API_KEY" \
+          # 4. Отправляем запрос к GitHub Models
+          RESPONSE=$(curl -s -X POST "https://models.github.ai/inference/chat/completions" \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
             -d "$JSON_PAYLOAD")
 
-          # Извлекаем текст ответа
-          SUMMARY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Не удалось получить описание"')
+          # 5. Извлекаем результат
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Не удалось получить описание"')
 
-          # Если ответ пустой или ошибка — показываем отладку (можно закомментировать)
-          if [ "$SUMMARY" = "Не удалось получить описание" ]; then
-            echo "Ошибка API. Ответ:"
-            echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
-          fi
-
-          # Публикуем комментарий в PR
-          gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary\n\n$SUMMARY"
+          # 6. Публикуем комментарий в PR
+          gh pr comment "$PR_NUMBER" --body "## 🤖 AI Summary (via GitHub Models)\n\n$SUMMARY"
