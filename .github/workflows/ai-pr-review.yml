@@ -9,7 +9,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  # 1. Генерация описания изменений (у вас уже работает)
   summarize:
     runs-on: ubuntu-latest
     steps:
@@ -44,42 +43,3 @@ jobs:
 
           # Исправлено: корректная передача переносов строк
           printf "## 🤖 AI Summary\n\n%s" "$SUMMARY" | gh pr comment "$PR_NUMBER" --body-file -
-
-  # 2. Автоматическое ревью кода (типовые проблемы)
-  review:
-    runs-on: ubuntu-latest
-    needs: summarize   # можно запускать параллельно, но оставим последовательно для ясности
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: AI Code Review with llm7.io
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          DIFF=$(gh pr diff "$PR_NUMBER")
-          if [ -z "$DIFF" ]; then
-            echo "Нет изменений для ревью"
-            exit 0
-          fi
-
-          # Промпт для поиска типовых проблем
-          PROMPT="Ты — эксперт по code review. Найди в этом diff типовые проблемы: потенциальные баги, уязвимости, ошибки форматирования, неэффективный код, нарушение best practices. Ответ должен быть на русском, структурированным (список или короткие абзацы). Если проблем нет — напиши '✅ Серьёзных проблем не обнаружено'. Вот diff:\n\n$DIFF"
-
-          RESPONSE=$(curl -s -X POST https://api.llm7.io/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"gpt-3.5-turbo\",
-              \"messages\": [
-                {\"role\": \"system\", \"content\": \"Ты — строгий, но конструктивный reviewer.\"},
-                {\"role\": \"user\", \"content\": $(echo "$PROMPT" | jq -Rs .)}
-              ]
-            }")
-
-          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Не удалось выполнить ревью"')
-
-          # Публикуем отдельный комментарий с ревью
-          printf "## 🔍 AI Code Review\n\n%s" "$REVIEW" | gh pr comment "$PR_NUMBER" --body-file -
